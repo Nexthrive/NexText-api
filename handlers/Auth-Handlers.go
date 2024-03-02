@@ -20,6 +20,7 @@ import (
 
 var collection = db.GetMongoDBClient().Database("Nex").Collection("users")
 var collectionFriendReq = db.GetMongoDBClient().Database("Nex").Collection("friend_req")
+var collectionMessages = db.GetMongoDBClient().Database("Nex").Collection("messages")
 
 func CreateUser(c *gin.Context) {
 	// body

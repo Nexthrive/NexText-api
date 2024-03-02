@@ -43,7 +43,7 @@ func GetMessages(sender string, receiver string) ([]models.Message, error) {
 		},
 	}
 
-	cursor, err := collection.Find(context.Background(), filter)
+	cursor, err := collectionMessages.Find(context.Background(), filter)
 	if err != nil {
 		return nil, fmt.Errorf("error finding messages %v", err)
 	}
@@ -76,7 +76,7 @@ func SaveMessage(message models.Message) error {
 	}
 
 	// Insert the encrypted message into the database
-	_, err = collection.InsertOne(context.Background(), bson.M{
+	_, err = collectionMessages.InsertOne(context.Background(), bson.M{
 		"timestamp": message.Timestamp,
 		"text":      encryptedText,
 		"sender":    message.Sender,
