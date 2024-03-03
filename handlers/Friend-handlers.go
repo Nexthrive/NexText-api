@@ -268,96 +268,23 @@ func GetFriends(c *gin.Context) {
 }
 
 func AccFriend(c *gin.Context) {
-	// Get token from request
-	tokenString := c.GetHeader("Authorization")
-
-	// Check if token is missing
-	if tokenString == "" {
-		fmt.Println("Token missing")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing token"})
-		return
-	}
-
-	// Parse token
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return []byte("gabolehdiliatbangrahasiainikaloluliatberartiluhmengakuigwganteng"), nil
-	})
-
-	// Check if there's an error during token parsing
-	if err != nil {
-		fmt.Println("Token parsing error:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid token: " + err.Error()})
-		return
-	}
-
-	// Check if token is invalid
-	if !token.Valid {
-		fmt.Println("Invalid token")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid token: signature is invalid"})
-		return
-	}
-
-	// Extract user ID from token claims
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		fmt.Println("Failed to extract claims from token")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to extract claims from token"})
-		return
-	}
-
-	userID, ok := claims["id"].(string)
-	if !ok {
-		fmt.Println("Failed to extract user ID from token claims")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to extract user ID from token claims"})
-		return
-	}
-
-	// Convert the userID string to primitive.ObjectID
-	objectID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		fmt.Println("Error converting user ID to ObjectID:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to convert user ID to ObjectID"})
-		return
-	}
-
-	// get user from user
-	var user models.User
-	if err := collection.FindOne(context.TODO(), bson.M{"_id": objectID}).Decode(&user); err != nil {
+	var req models.FriendReq
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	// get friend request from the ToID and FromID with the id get to user and from user
-	var friendReq models.FriendReq
-	if err := collectionFriendReq.FindOne(context.TODO(), bson.D{
-		{Key: "FromID", Value: user.ID},
-		{Key: "ToID", Value: user.ID},
-	}).Decode(&friendReq); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := collectionFriendReq.FindOneAndUpdate(context.TODO(), bson.M{"ToID": req.ToID}, bson.M{"$set": bson.M{"status": "accepted"}}).Decode(&req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
-	if err == mongo.ErrNoDocuments {
-		c.JSON(http.StatusNotFound, gin.H{"error": "null friend request"})
+	if err := collection.FindOneAndUpdate(context.TODO(), bson.M{"_id": req.FromID}, bson.M{"$push": bson.M{"friends": req.ToID}}).Decode(&req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
-
-	if err := collectionFriendReq.FindOneAndUpdate(context.TODO(), bson.D{{Key: "_id", Value: friendReq.ID}},
-		bson.D{{Key: "$set", Value: bson.D{{Key: "status", Value: "accepted"}}}}).Err(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := collection.FindOneAndUpdate(context.TODO(), bson.M{"_id": req.ToID}, bson.M{"$push": bson.M{"friends": req.FromID}}).Decode(&req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
 		return
 	}
 
-	if err := collection.FindOneAndUpdate(context.TODO(), bson.M{"_id": user.ID},
-		bson.D{{Key: "$push", Value: bson.D{{Key: "Friends", Value: friendReq.FromID}}}}).Err(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if err := collection.FindOneAndUpdate(context.TODO(), bson.M{"_id": friendReq.FromID},
-		bson.D{{Key: "$push", Value: bson.D{{Key: "Friends", Value: user.ID}}}}).Err(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Friend request accepted successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Friend request accepted"})
 }
