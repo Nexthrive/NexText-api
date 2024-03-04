@@ -278,3 +278,71 @@ func GetUserById(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
+
+func DeleteMyAccount(c *gin.Context) {
+	// Get token from request
+	tokenString := c.GetHeader("Authorization")
+
+	// Check if token is missing
+	if tokenString == "" {
+		fmt.Println("Token missing")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing token"})
+		return
+	}
+	fmt.Println("{token:}", tokenString)
+
+	// Parse token
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return []byte("gabolehdiliatbangrahasiainikaloluliatberartiluhmengakuigwganteng"), nil
+	})
+
+	// Check if there's an error during token parsing
+	if err != nil {
+		fmt.Println("Token parsing error:", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid token: " + err.Error()})
+		return
+	}
+
+	// Check if token is invalid
+	if !token.Valid {
+		fmt.Println("Invalid token")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid token: signature is invalid"})
+		return
+	}
+	// Extract user ID from token claims
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		fmt.Println("Failed to extract claims from token")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to extract claims from token"})
+		return
+	}
+
+	userID, ok := claims["id"].(string)
+	if !ok {
+		fmt.Println("Failed to extract user ID from token claims")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to extract user ID from token claims"})
+		return
+	}
+
+	// Convert the userID string to primitive.ObjectID
+	objectID, err := primitive.ObjectIDFromHex(userID)
+	if err != nil {
+		fmt.Println("Error converting user ID to ObjectID:", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to convert user ID to ObjectID"})
+		return
+	}
+
+	// Delete user based on ID
+	result, err := collection.DeleteOne(context.TODO(), bson.M{"_id": objectID})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete user"})
+		return
+	}
+
+	if result.DeletedCount == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "user deleted successfully"})
+}

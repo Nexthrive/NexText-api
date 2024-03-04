@@ -10,4 +10,5 @@ func UserRoutes(r *gin.Engine) {
 	r.POST("/verify-otp", handlers.VerifyOTP)
 	r.POST("/login", handlers.Login)
 	r.GET("/user", handlers.GetUserById)
+	r.DELETE("/delete", handlers.DeleteMyAccount)
 }
