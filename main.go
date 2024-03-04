@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 
 	"github.com/Nexthrive/NexText/db"
 	"github.com/Nexthrive/NexText/routes"
@@ -31,6 +32,15 @@ func main() {
 	routes.UserRoutes(r)
 	routes.WebSocketRoutes(r)
 	routes.FriendRoutes(r)
+
+	r.Handle(http.MethodGet, "/", Handler)
 	
 	r.Run(":8080")
+}
+
+
+func Handler(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Hello from the handler!",
+	})
 }
