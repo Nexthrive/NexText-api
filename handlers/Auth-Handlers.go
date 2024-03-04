@@ -23,7 +23,6 @@ var collectionFriendReq = db.GetMongoDBClient().Database("Nex").Collection("frie
 var collectionMessages = db.GetMongoDBClient().Database("Nex").Collection("messages")
 
 func CreateUser(c *gin.Context) {
-	// body
 	var user models.User
 	if err := c.ShouldBindJSON(&user); err != nil {
 		c.AbortWithError(http.StatusBadRequest, err)
@@ -32,146 +31,111 @@ func CreateUser(c *gin.Context) {
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Passphrase), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
 	}
-
 	user.Passphrase = string(hashedPassword)
 	user.Status = false
 	user.ID = primitive.NewObjectID()
 
-	// checking if there is any user based on email
+	// Checking if there is any user based on email
 	var existingUser models.User
 	err = collection.FindOne(context.TODO(), bson.M{"email": user.Email}).Decode(&existingUser)
-	if err == mongo.ErrNoDocuments {
-		// generate otp
-		otp := rand.Intn(999999-100000) + 100000
-
-		// body of the mail
-		m := gomail.NewMessage()
-		m.SetHeader("From", "nexthrivestudios@gmail.com")
-		m.SetHeader("To", user.Email)
-		m.SetHeader("Subject", "NexText OTP")
-
-		logoPath := "../assets/NexText.png"
-
-		// HTML body with styling
-		htmlBody := fmt.Sprintf(`
-		<!DOCTYPE html>
-		<html>
-		<head>
-			<style>
-				body {
-					font-family: Arial, sans-serif;
-					background-color: #fff; /* Secondary color */
-					color: #000; /* Primary color */
-					margin: 0;
-					padding: 0;
-				}
-				.container {
-					max-width: 600px;
-					margin: 0 auto;
-					padding: 20px;
-				}
-				.header {
-					background-color: #000; /* Primary color */
-					color: #fff; /* Secondary color */
-					text-align: center;
-					padding: 10px;
-				}
-				.logo img {
-					max-width: 100px;
-					height: auto;
-				}
-				.content {
-					background-color: #fff; /* Secondary color */
-					padding: 20px;
-					border-radius: 5px;
-					box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-				}
-			</style>
-		</head>
-		<body>
-			<div class="container">
-				<div class="header">
-					<div class="logo">
-						<img src="%s" alt="Logo">
-					</div>
-					<h1>NexText OTP</h1>
-				</div>
-				<div class="content">
-					<p>Your OTP is: <strong>%d</strong></p>
-				</div>
-			</div>
-		</body>
-		</html>
-	`, logoPath, otp)
-
-		m.SetBody("text/html", htmlBody)
-		d := gomail.NewDialer("smtp.gmail.com", 587, "nexthrivestudios@gmail.com", "vnujtsexvthxuykv")
-
-		// send mail
-		if err := d.DialAndSend(m); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		user.OTP = otp
-
-		_, insert := collection.InsertOne(context.TODO(), user)
-		if insert != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": insert.Error()})
-			return
-		}
-
-		c.JSON(http.StatusCreated, gin.H{
-			"message": "user created succes",
-			"user":    user,
-		})
-	} else if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err != nil && err != mongo.ErrNoDocuments {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
-	} else if err != mongo.ErrNoDocuments {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "cannot find user"})
+	} else if err == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already exists"})
 		return
 	}
 
-	// checking if the name is unique
+	// Checking if the name is unique
 	err = collection.FindOne(context.TODO(), bson.M{"name": user.Name}).Decode(&existingUser)
 	if err == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": "Name is already taken"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Name is already taken"})
 		return
 	} else if err != mongo.ErrNoDocuments {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		return
 	}
 
-	// generate OTP
+	// Generate OTP
 	otp := rand.Intn(999999-100000) + 100000
 
-	// body of the mail
+	// Send OTP via email
 	m := gomail.NewMessage()
-	m.SetHeader("From", "idklol0209@gmail.com")
+	m.SetHeader("From", "nexthrivestudios@gmail.com")
 	m.SetHeader("To", user.Email)
 	m.SetHeader("Subject", "NexText OTP")
-	m.SetBody("text/plain", fmt.Sprintf("Your OTP is: %d", otp))
-
+	htmlBody := fmt.Sprintf(`
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<style>
+			body {
+				font-family: Arial, sans-serif;
+				background-color: #fff; /* Secondary color */
+				color: #000; /* Primary color */
+				margin: 0;
+				padding: 0;
+			}
+			.container {
+				max-width: 600px;
+				margin: 0 auto;
+				padding: 20px;
+			}
+			.header {
+				background-color: #000; /* Primary color */
+				color: #fff; /* Secondary color */
+				text-align: center;
+				padding: 10px;
+			}
+			.logo img {
+				max-width: 100px;
+				height: auto;
+			}
+			.content {
+				background-color: #fff; /* Secondary color */
+				padding: 20px;
+				border-radius: 5px;
+				box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+			}
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<div class="header">
+				<div class="logo">
+					<img src="%s" alt="Logo">
+				</div>
+				<h1>NexText OTP</h1>
+			</div>
+			<div class="content">
+				<p>Your OTP is: <strong>%d</strong></p>
+			</div>
+		</div>
+	</body>
+	</html>
+	`, "../assets/NexText.png", otp)
+	m.SetBody("text/html", htmlBody)
 	d := gomail.NewDialer("smtp.gmail.com", 587, "nexthrivestudios@gmail.com", "vnujtsexvthxuykv")
 
-	// send mail
+	// Send mail
 	if err := d.DialAndSend(m); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send OTP"})
+		fmt.Println(err)
 		return
 	}
 	user.OTP = otp
 
 	_, insert := collection.InsertOne(context.TODO(), user)
 	if insert != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": insert.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to insert user into database"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "user created successfully",
+		"message": "User created successfully",
 		"user":    user,
 	})
 }
