@@ -92,6 +92,14 @@ func AddFriend(c *gin.Context) {
 	}
 	fmt.Println(user)
 
+	// Check if the user is already a friend
+	for _, friendID := range user.Friends {
+		if friendID == objectID {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "User is already your friend"})
+			return
+		}
+	}
+
 	friendReq.FromID = objectID
 	friendReq.ToID = user.ID
 	friendReq.Status = "pending"
