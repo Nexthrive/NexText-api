@@ -267,6 +267,19 @@ func GetFriends(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"friends": friendsData})
 }
 
+func DeclineFriend(c *gin.Context) {
+	var req models.FriendReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := collectionFriendReq.FindOneAndUpdate(context.TODO(), bson.M{"_id": req.ID}, bson.M{"$set": bson.M{"status": "declined"}}).Decode(&req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Friend request declined"})
+}
+
 func AccFriend(c *gin.Context) {
 	var req models.FriendReq
 	if err := c.ShouldBindJSON(&req); err != nil {
