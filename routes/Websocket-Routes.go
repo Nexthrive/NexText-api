@@ -6,5 +6,5 @@ import (
 )
 
 func WebSocketRoutes (r *gin.Engine) {
-	r.GET("/ws/:UserID/:ReceiverID", handlers.HandleWebSocket)
+	r.GET("/ws/:ChatID", handlers.HandleWebSocket)
 }

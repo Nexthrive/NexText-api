@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -25,18 +26,20 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
-var (
-	mutex   sync.Mutex
-	clients = make(map[string]*websocket.Conn)
-)
-
 type WebsocketMessage struct {
-	Text string `json:"text"`
+	Text       string `json:"text"`
+	ReceiverID string `json:"receiver_id"`
 }
+
+var (
+	mutex        sync.Mutex
+	clients      = make(map[string]*websocket.Conn)
+	messageQueue = make(map[string][]models.Message)
+)
 
 var encryptkey = []byte(os.Getenv("ENCRYPT_KEY"))
 
-func GetMessages(sender string, receiver string) ([]models.Message, error) {
+func GetMessages(sender, receiver string) ([]models.Message, error) {
 	filter := bson.M{
 		"$or": []bson.M{
 			{"sender": sender, "receiver": receiver},
@@ -48,32 +51,25 @@ func GetMessages(sender string, receiver string) ([]models.Message, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error finding messages %v", err)
 	}
-
 	defer cursor.Close(context.Background())
 
 	var messages []models.Message
-
 	for cursor.Next(context.Background()) {
 		var message models.Message
-
 		if err := cursor.Decode(&message); err != nil {
 			return nil, fmt.Errorf("error decoding message %v", err)
 		}
-
 		messages = append(messages, message)
 	}
-
 	return messages, nil
 }
 
 func SaveMessage(message models.Message) error {
 	key := encryptkey
-
 	encryptedText, err := encrypt(message.Text, key)
 	if err != nil {
 		return fmt.Errorf("error encrypting message: %v", err)
 	}
-
 	_, err = collectionMessages.InsertOne(context.Background(), bson.M{
 		"timestamp": message.Timestamp,
 		"text":      encryptedText,
@@ -83,106 +79,9 @@ func SaveMessage(message models.Message) error {
 	if err != nil {
 		return fmt.Errorf("error inserting message into database: %v", err)
 	}
-
 	return nil
 }
 
-func broadcastMessage(message models.Message) {
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	for _, conn := range clients {
-			// Exclude sender from receiving their own messages
-			if message.Sender != conn.RemoteAddr().String() {
-					err := conn.WriteJSON(message)
-					if err != nil {
-							fmt.Println("error broadcasting message:", err)
-					}
-			}
-	}
-}
-
-func HandleWebSocket(c *gin.Context) {
-	upgrader.CheckOrigin = func(r *http.Request) bool {
-		return true
-	}
-
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		fmt.Println("error upgrading to WebSocket:", err)
-		return
-	}
-
-	sender := c.Param("UserID")
-	receiver := c.Param("ReceiverID")
-
-	mutex.Lock()
-	_, online := clients[receiver]
-	mutex.Unlock()
-
-	if online {
-		fmt.Printf("User %s is online\n", receiver)
-	} else {
-		storedMessages, err := GetMessages(sender, receiver)
-		if err != nil {
-			fmt.Println("Error retrieving stored messages:", err)
-		} else {
-			for _, msg := range storedMessages {
-				decryptedText, err := decrypt(msg.Text, encryptkey)
-				if err != nil {
-					fmt.Println("Error decrypting message:", err)
-					continue
-				}
-
-				decryptedMessage := models.Message{
-					Timestamp: msg.Timestamp,
-					Text:      decryptedText,
-					Sender:    msg.Sender,
-					Receiver:  msg.Receiver,
-				}
-
-				conn.WriteJSON(decryptedMessage)
-			}
-		}
-	}
-
-	mutex.Lock()
-	clients[sender] = conn
-	mutex.Unlock()
-
-	defer func() {
-		mutex.Lock()
-		delete(clients, sender)
-		mutex.Unlock()
-		conn.Close()
-	}()
-
-	for {
-		var wsMsg WebsocketMessage
-
-		err := conn.ReadJSON(&wsMsg)
-		if err != nil {
-			fmt.Println("error reading WebSocket message:", err)
-			break
-		}
-
-		message := models.Message{
-			Timestamp: time.Now(),
-			Text:      wsMsg.Text,
-			Sender:    sender,
-			Receiver:  receiver,
-		}
-
-		err = SaveMessage(message)
-		if err != nil {
-			fmt.Println("error saving message:", err)
-		}
-
-		broadcastMessage(message)
-	}
-}
-
-// encrypt function takes plaintext and a key, and returns the base64-encoded ciphertext
 func encrypt(text string, key []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -201,7 +100,6 @@ func encrypt(text string, key []byte) (string, error) {
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// decrypt function takes base64-encoded ciphertext and a key, and returns the plaintext
 func decrypt(ciphertext string, key []byte) (string, error) {
 	ciphertextBytes, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
@@ -224,3 +122,78 @@ func decrypt(ciphertext string, key []byte) (string, error) {
 
 	return string(ciphertextBytes), nil
 }
+
+func HandleWebSocket(c *gin.Context) {
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+
+	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer ws.Close()
+
+	// Extract user ID and friend ID from headers
+	userID := c.GetHeader("UserID")
+	friendID := c.GetHeader("FriendID")
+
+	// Register the WebSocket connection
+	mutex.Lock()
+	clients[userID] = ws
+	mutex.Unlock()
+
+	// Load existing messages from the database
+	messages, err := GetMessages(userID, friendID)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	// Send existing messages to the client
+	for _, message := range messages {
+		decryptedText, err := decrypt(message.Text, encryptkey)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		ws.WriteJSON(WebsocketMessage{
+			Text:       decryptedText,
+			ReceiverID: message.Receiver,
+		})
+	}
+
+	// Handle incoming WebSocket messages
+	for {
+		var wsMessage WebsocketMessage
+		err := ws.ReadJSON(&wsMessage)
+		if err != nil {
+			log.Println(err)
+			break
+		}
+
+		// Save the message to the database
+		err = SaveMessage(models.Message{
+			Timestamp: time.Now(),
+			Text:      wsMessage.Text,
+			Sender:    userID,
+			Receiver:  friendID,
+		})
+		if err != nil {
+			log.Println(err)
+			break
+		}
+
+		// Broadcast the message to the friend if they are online
+		mutex.Lock()
+		friendWS, ok := clients[friendID]
+		mutex.Unlock()
+
+		if ok {
+			friendWS.WriteJSON(wsMessage)
+		}
+	}
+}
+
+
+
