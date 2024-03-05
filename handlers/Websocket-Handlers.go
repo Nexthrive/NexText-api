@@ -28,7 +28,7 @@ var upgrader = websocket.Upgrader{
 
 type WebsocketMessage struct {
 	Text       string    `json:"text"`
-	ReceiverID string    `json:"receiver_id"`
+	ReceiverID string    `json:"receiver"`
 	Timestamp  time.Time `json:"timestamp"`
 }
 
