@@ -288,41 +288,26 @@ func DeclineFriend(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Friend request declined"})
 }
 
-func AcceptFriend(c *gin.Context) {
+func AccFriend(c *gin.Context) {
 	var req models.FriendReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON data"})
-		fmt.Println("Error binding JSON:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Update the status of the friend request to "accepted"
-	err := collectionFriendReq.FindOneAndUpdate(
-		context.TODO(),
-		bson.M{"_id": req.ID},
-		bson.M{"$set": bson.M{"status": "accepted"}},
-	).Decode(&req)
-	if err != nil {
+	if err := collectionFriendReq.FindOneAndUpdate(context.TODO(), bson.M{"_id": req.ID}, bson.M{"$set": bson.M{"status": "accepted"}}).Decode(&req); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		fmt.Println("Error updating friend request status:", err.Error())
+		return
+	}
+	var user models.User
+	if err := collection.FindOneAndUpdate(context.TODO(), bson.M{"_id": req.FromID}, bson.M{"$push": bson.M{"friends": req.ToID}}).Decode(&user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if err := collection.FindOneAndUpdate(context.TODO(), bson.M{"_id": req.ToID}, bson.M{"$push": bson.M{"friends": req.FromID}}).Decode(&user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if err := collection.FindOneAndUpdate(
-		context.TODO(),
-		bson.M{"_id": req.FromID},
-		bson.M{"$push": bson.M{"friends": req.ToID}},
-	); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	if err := collection.FindOneAndUpdate(
-		context.TODO(),
-		bson.M{"_id": req.ToID},
-		bson.M{"$push": bson.M{"friends": req.FromID}},
-	); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
 	c.JSON(http.StatusOK, gin.H{"message": "Friend request accepted"})
 }
