@@ -27,8 +27,9 @@ var upgrader = websocket.Upgrader{
 }
 
 type WebsocketMessage struct {
-	Text       string `json:"text"`
-	ReceiverID string `json:"receiver_id"`
+	Text       string    `json:"text"`
+	ReceiverID string    `json:"receiver_id"`
+	Timestamp  time.Time `json:"timestamp"`
 }
 
 var (
@@ -36,6 +37,7 @@ var (
 	clients      = make(map[string]*websocket.Conn)
 	// messageQueue = make(map[string][]models.Message)
 )
+
 
 var encryptkey = []byte(os.Getenv("ENCRYPT_KEY"))
 
@@ -126,32 +128,34 @@ func decrypt(ciphertext string, key []byte) (string, error) {
 func HandleWebSocket(c *gin.Context) {
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 
-	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		log.Println("WebSocket Upgrade Error:", err)
-		return
-	}
-	defer ws.Close()
+    ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+    if err != nil {
+        log.Println("WebSocket Upgrade Error:", err)
+        return
+    }
+    defer ws.Close()
 
-	// Extract user ID and friend ID from headers
-	userID := c.GetHeader("UserID")
-	friendID := c.GetHeader("FriendID")
+    // Extract user ID and friend ID from headers
+    userID := c.Query("UserID")
+    friendID := c.Query("FriendID")
 
-	if userID == "" || friendID == "" {
-		log.Println("Invalid UserID or FriendID in headers")
-		return
-	}
+    fmt.Println("User ID:", userID)
 
-	// Register the WebSocket connection
-	mutex.Lock()
-	clients[userID] = ws
-	mutex.Unlock()
+    if userID == "" || friendID == "" {
+        log.Println("Invalid UserID or FriendID in query parameters")
+        return
+    }
+
+    // Register the WebSocket connection
+    mutex.Lock()
+    clients[userID] = ws
+    mutex.Unlock()
 
 	// Load existing messages from the database
 	messages, err := GetMessages(userID, friendID)
 	if err != nil {
-		log.Println("Error retrieving messages from the database:", err)
-		return
+			log.Println("Error retrieving messages from the database:", err)
+			return
 	}
 
 	// Send existing messages to the client
@@ -161,49 +165,51 @@ func HandleWebSocket(c *gin.Context) {
 			log.Println("Error decrypting message:", err)
 			return
 		}
-
+	
 		ws.WriteJSON(WebsocketMessage{
 			Text:       decryptedText,
 			ReceiverID: message.Receiver,
+			Timestamp:  message.Timestamp,
 		})
 	}
 
 	// Handle incoming WebSocket messages
 	for {
-		var wsMessage WebsocketMessage
-		err := ws.ReadJSON(&wsMessage)
-		if err != nil {
-			log.Println("WebSocket Read Error:", err)
-			break
-		}
+			var wsMessage WebsocketMessage
+			err := ws.ReadJSON(&wsMessage)
+			if err != nil {
+					log.Println("WebSocket Read Error:", err)
+					break
+			}
 
-		// Save the message to the database
-		err = SaveMessage(models.Message{
-			Timestamp: time.Now(),
-			Text:      wsMessage.Text,
-			Sender:    userID,
-			Receiver:  friendID,
-		})
-		if err != nil {
-			log.Println("Error saving message to the database:", err)
-			break
-		}
+			// Save the message to the database
+			err = SaveMessage(models.Message{
+					Timestamp: time.Now(),
+					Text:      wsMessage.Text,
+					Sender:    userID,
+					Receiver:  friendID,
+			})
+			if err != nil {
+					log.Println("Error saving message to the database:", err)
+					break
+			}
 
-		// Broadcast the message to the friend if they are online
-		mutex.Lock()
-		friendWS, ok := clients[friendID]
-		mutex.Unlock()
+			// Broadcast the message to the friend if they are online
+			mutex.Lock()
+			friendWS, ok := clients[friendID]
+			mutex.Unlock()
 
-		if ok {
-			go func() {
-				friendWS.WriteJSON(WebsocketMessage{
-					Text:       wsMessage.Text,
-					ReceiverID: friendID,
-				})
-			}()
-		}
+			if ok {
+					go func() {
+							friendWS.WriteJSON(WebsocketMessage{
+									Text:       wsMessage.Text,
+									ReceiverID: friendID,
+							})
+					}()
+			}
 	}
 }
+
 
 
 
