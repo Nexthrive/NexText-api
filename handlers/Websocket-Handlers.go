@@ -34,7 +34,7 @@ type WebsocketMessage struct {
 var (
 	mutex        sync.Mutex
 	clients      = make(map[string]*websocket.Conn)
-	messageQueue = make(map[string][]models.Message)
+	// messageQueue = make(map[string][]models.Message)
 )
 
 var encryptkey = []byte(os.Getenv("ENCRYPT_KEY"))
@@ -128,7 +128,7 @@ func HandleWebSocket(c *gin.Context) {
 
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		log.Println(err)
+		log.Println("WebSocket Upgrade Error:", err)
 		return
 	}
 	defer ws.Close()
@@ -136,6 +136,11 @@ func HandleWebSocket(c *gin.Context) {
 	// Extract user ID and friend ID from headers
 	userID := c.GetHeader("UserID")
 	friendID := c.GetHeader("FriendID")
+
+	if userID == "" || friendID == "" {
+		log.Println("Invalid UserID or FriendID in headers")
+		return
+	}
 
 	// Register the WebSocket connection
 	mutex.Lock()
@@ -145,7 +150,7 @@ func HandleWebSocket(c *gin.Context) {
 	// Load existing messages from the database
 	messages, err := GetMessages(userID, friendID)
 	if err != nil {
-		log.Println(err)
+		log.Println("Error retrieving messages from the database:", err)
 		return
 	}
 
@@ -153,7 +158,7 @@ func HandleWebSocket(c *gin.Context) {
 	for _, message := range messages {
 		decryptedText, err := decrypt(message.Text, encryptkey)
 		if err != nil {
-			log.Println(err)
+			log.Println("Error decrypting message:", err)
 			return
 		}
 
@@ -168,7 +173,7 @@ func HandleWebSocket(c *gin.Context) {
 		var wsMessage WebsocketMessage
 		err := ws.ReadJSON(&wsMessage)
 		if err != nil {
-			log.Println(err)
+			log.Println("WebSocket Read Error:", err)
 			break
 		}
 
@@ -180,7 +185,7 @@ func HandleWebSocket(c *gin.Context) {
 			Receiver:  friendID,
 		})
 		if err != nil {
-			log.Println(err)
+			log.Println("Error saving message to the database:", err)
 			break
 		}
 
@@ -190,7 +195,12 @@ func HandleWebSocket(c *gin.Context) {
 		mutex.Unlock()
 
 		if ok {
-			friendWS.WriteJSON(wsMessage)
+			go func() {
+				friendWS.WriteJSON(WebsocketMessage{
+					Text:       wsMessage.Text,
+					ReceiverID: friendID,
+				})
+			}()
 		}
 	}
 }
